@@ -8,6 +8,11 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.82"
-clap = { version = "4.5.4", features = ["derive"] }
-oxhttp = { version = "0.2.0", features = ["flate2"] }
-oxigraph = "0.3.22"
+clap = { version = "=4.0", features = ["derive"] }
+oxhttp = { version = "0.1.0", features = ["rayon"] }
+oxigraph = { version = "0.3.22" }
+oxiri = "0.2.3"
+rand = "0.8.5"
+rayon-core = "1.12.1"
+sparesults = { version = "0.1.8", features = ["rdf-star"] }
+url = "2.5.0"
