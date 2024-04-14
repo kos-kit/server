@@ -52,7 +52,7 @@ pub fn main() -> anyhow::Result<()> {
     }?;
 
     let mut server = if args.cors {
-        Server::new(cors::cors_middleware(move |request| {
+        Server::new(cors::middleware(move |request| {
             sparql::handle_request(request, store.clone(), args.read_only)
                 .unwrap_or_else(|(status, message)| error(status, message))
         }))

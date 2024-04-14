@@ -1,7 +1,7 @@
 use oxhttp::model::{HeaderName, HeaderValue, Method, Request, Response, Status};
 use std::str::FromStr;
 
-pub fn cors_middleware(
+pub fn middleware(
     on_request: impl Fn(&mut Request) -> Response + Send + Sync + 'static,
 ) -> impl Fn(&mut Request) -> Response + Send + Sync + 'static {
     let origin = HeaderName::from_str("Origin").unwrap();
