@@ -1,8 +1,8 @@
 // Adapted from oxigraph_server main.rs, MIT OR Apache-2.0 license
 
 #![allow(clippy::print_stderr, clippy::cast_precision_loss, clippy::use_debug)]
-use anyhow::{anyhow, bail, Error};
-use clap::{Parser, Subcommand};
+use anyhow::{bail, Error};
+use clap::Parser;
 use oxhttp::model::{Body, HeaderName, HeaderValue, Method, Request, Response, Status};
 use oxhttp::Server;
 use oxigraph::io::{DatasetFormat, DatasetSerializer, GraphFormat, GraphSerializer};
@@ -30,108 +30,50 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 #[command(about, version)]
 /// Oxigraph SPARQL server.
 struct Args {
+    /// Host and port to listen to.
+    #[arg(short, long, default_value = "localhost:7878")]
+    bind: String,
+
+    /// Allows cross-origin requests
+    #[arg(long)]
+    cors: bool,
+
     /// Directory in which the data should be persisted.
     ///
     /// If not present. An in-memory storage will be used.
-    #[arg(short, long, global = true)]
-    location: Option<PathBuf>, //TODO: move into commands on next breaking release
-    #[command(subcommand)]
-    command: Command,
-}
+    #[arg(short, long)]
+    location: Option<PathBuf>,
 
-#[derive(Subcommand)]
-enum Command {
-    /// Start Oxigraph HTTP server in read-write mode.
-    Serve {
-        /// Host and port to listen to.
-        #[arg(short, long, default_value = "localhost:7878")]
-        bind: String,
-        /// Allows cross-origin requests
-        #[arg(long)]
-        cors: bool,
-    },
     /// Start Oxigraph HTTP server in read-only mode.
-    ///
-    /// It allows to read the database while other processes are also reading it.
-    /// Opening as read-only while having an other process writing the database is undefined behavior.
-    /// Please use the serve-secondary command in this case.
-    ServeReadOnly {
-        /// Host and port to listen to.
-        #[arg(short, long, default_value = "localhost:7878")]
-        bind: String,
-        /// Allows cross-origin requests
-        #[arg(long)]
-        cors: bool,
-    },
-    /// Start Oxigraph HTTP server in secondary mode.
-    ///
-    /// It allows to read the database while an other process is writing it.
-    /// Changes done while this process is running will be replicated after a possible lag.
-    ///
-    /// Beware: RocksDB secondary mode does not support snapshots and transactions.
-    /// Dirty reads might happen.
-    ServeSecondary {
-        /// Directory where the primary Oxigraph instance is writing to.
-        #[arg(long, conflicts_with = "location")]
-        primary_location: Option<PathBuf>,
-        /// Directory to which the current secondary instance might write to.
-        ///
-        /// By default, temporary storage is used.
-        #[arg(long)]
-        secondary_location: Option<PathBuf>,
-        /// Host and port to listen to.
-        #[arg(short, long, default_value = "localhost:7878")]
-        bind: String,
-        /// Allows cross-origin requests
-        #[arg(long)]
-        cors: bool,
-    },
+    #[arg(long)]
+    read_only: bool,
 }
 
 pub fn main() -> anyhow::Result<()> {
-    let matches = Args::parse();
-    match matches.command {
-        Command::Serve { bind, cors } => serve(
-            if let Some(location) = matches.location {
-                Store::open(location)
-            } else {
-                Store::new()
-            }?,
-            bind,
-            false,
-            cors,
-        ),
-        Command::ServeReadOnly { bind, cors } => serve(
-            Store::open_read_only(
-                matches
-                    .location
-                    .ok_or_else(|| anyhow!("The --location argument is required"))?,
-            )?,
-            bind,
-            true,
-            cors,
-        ),
-        Command::ServeSecondary {
-            primary_location,
-            secondary_location,
-            bind,
-            cors,
-        } => {
-            let primary_location = primary_location.or(matches.location).ok_or_else(|| {
-                anyhow!("Either the --location or the --primary-location argument is required")
-            })?;
-            serve(
-                if let Some(secondary_location) = secondary_location {
-                    Store::open_persistent_secondary(primary_location, secondary_location)
-                } else {
-                    Store::open_secondary(primary_location)
-                }?,
-                bind,
-                true,
-                cors,
-            )
-        }
-    }
+    let args = Args::parse();
+
+    let store = if let Some(location) = args.location {
+        Store::open(location)
+    } else {
+        Store::new()
+    }?;
+
+    let mut server = if args.cors {
+        Server::new(cors_middleware(move |request| {
+            handle_request(request, store.clone(), args.read_only)
+                .unwrap_or_else(|(status, message)| error(status, message))
+        }))
+    } else {
+        Server::new(move |request| {
+            handle_request(request, store.clone(), args.read_only)
+                .unwrap_or_else(|(status, message)| error(status, message))
+        })
+    };
+    server.set_global_timeout(HTTP_TIMEOUT);
+    server.set_server_name(concat!("kos-kit/server", env!("CARGO_PKG_VERSION")))?;
+    // eprintln!("Listening for requests at http://{}", &args.bind);
+    server.listen(args.bind)?;
+    Ok(())
 }
 
 #[derive(Copy, Clone)]
@@ -182,25 +124,6 @@ impl FromStr for GraphOrDatasetFormat {
         }
         bail!("The file format '{name}' is unknown")
     }
-}
-
-fn serve(store: Store, bind: String, read_only: bool, cors: bool) -> anyhow::Result<()> {
-    let mut server = if cors {
-        Server::new(cors_middleware(move |request| {
-            handle_request(request, store.clone(), read_only)
-                .unwrap_or_else(|(status, message)| error(status, message))
-        }))
-    } else {
-        Server::new(move |request| {
-            handle_request(request, store.clone(), read_only)
-                .unwrap_or_else(|(status, message)| error(status, message))
-        })
-    };
-    server.set_global_timeout(HTTP_TIMEOUT);
-    server.set_server_name(concat!("Oxigraph/", env!("CARGO_PKG_VERSION")))?;
-    eprintln!("Listening for requests at http://{}", &bind);
-    server.listen(bind)?;
-    Ok(())
 }
 
 fn cors_middleware(
