@@ -1,0 +1,13 @@
+[package]
+name = "server"
+edition = "2021"
+repository = "https://github.com/kos-kit/server"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.82"
+clap = { version = "4.5.4", features = ["derive"] }
+oxhttp = { version = "0.2.0", features = ["flate2"] }
+oxigraph = "0.3.22"
