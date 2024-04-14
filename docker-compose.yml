@@ -1,0 +1,6 @@
+services:
+  server:
+    build: .
+    image: kos-kit/server
+    # volumes:
+    #   - ./data:/app/data:ro
