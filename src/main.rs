@@ -53,6 +53,8 @@ pub fn main() -> anyhow::Result<()> {
 
     if store.is_empty()? {
         init::init(args.init_path, store.clone())?
+    } else {
+        eprintln!("Oxigraph/Tantivy is not empty, skipping init")
     }
 
     let mut server = if args.cors {
@@ -68,7 +70,7 @@ pub fn main() -> anyhow::Result<()> {
     };
     server.set_global_timeout(HTTP_TIMEOUT);
     server.set_server_name(concat!("kos-kit/server", env!("CARGO_PKG_VERSION")))?;
-    // eprintln!("Listening for requests at http://{}", &args.bind);
+    eprintln!("Listening for requests at http://{}", &args.bind);
     server.listen(args.bind)?;
     Ok(())
 }
