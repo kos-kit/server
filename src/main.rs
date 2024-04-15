@@ -2,7 +2,7 @@
 
 #![allow(clippy::print_stderr, clippy::cast_precision_loss, clippy::use_debug)]
 use clap::Parser;
-use kos_kit_server::{cors, sparql};
+use kos_kit_server::{cors, init, sparql};
 use oxhttp::model::{HeaderName, Response, Status};
 use oxhttp::Server;
 use oxigraph::store::Store;
@@ -24,11 +24,15 @@ struct Args {
     #[arg(long)]
     cors: bool,
 
-    /// Directory in which the data should be persisted.
+    /// Path to an RDF files or a directory of RDF files to load into the server
+    #[arg(long, required = true)]
+    init_path: PathBuf,
+
+    /// Directory in which Oxigraph data should be persisted.
     ///
     /// If not present. An in-memory storage will be used.
-    #[arg(short, long)]
-    location: Option<PathBuf>,
+    #[arg(long)]
+    oxigraph_data_directory_path: Option<PathBuf>,
 }
 
 fn error(status: Status, message: impl fmt::Display) -> Response {
@@ -41,11 +45,13 @@ fn error(status: Status, message: impl fmt::Display) -> Response {
 pub fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let store = if let Some(location) = args.location {
+    let store = if let Some(location) = args.oxigraph_data_directory_path {
         Store::open(location)
     } else {
         Store::new()
     }?;
+
+    init::init(args.init_path, store.clone())?;
 
     let mut server = if args.cors {
         Server::new(cors::middleware(move |request| {

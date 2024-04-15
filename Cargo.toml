@@ -9,7 +9,9 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1"
 clap = { version = "=4.0", features = ["derive"] }
+flate2 = "=1.0.26"
 oxhttp = { version = "0.1", features = ["rayon"] }
 oxigraph = { version = "0.3.22" }
+rayon-core = "1"
 sparesults = { version = "0.1.8", features = ["rdf-star"] }
 url = "2"
