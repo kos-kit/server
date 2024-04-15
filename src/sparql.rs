@@ -1,89 +1,28 @@
 // Adapted from oxigraph_server main.rs, MIT OR Apache-2.0 license
 
 #![allow(clippy::print_stderr, clippy::cast_precision_loss, clippy::use_debug)]
-use anyhow::{bail, Error};
 use oxhttp::model::{Body, HeaderName, HeaderValue, Request, Response, Status};
-use oxigraph::io::{DatasetFormat, DatasetSerializer, GraphFormat, GraphSerializer};
-use oxigraph::model::{GraphName, GraphNameRef, IriParseError, NamedNode, NamedOrBlankNode};
-use oxigraph::sparql::{Query, QueryResults, Update};
-use oxigraph::store::{BulkLoader, LoaderError, Store};
-use oxiri::Iri;
-use rand::random;
+use oxigraph::io::{GraphFormat, GraphSerializer};
+use oxigraph::model::{GraphName, IriParseError, NamedNode, NamedOrBlankNode};
+use oxigraph::sparql::{Query, QueryResults};
+use oxigraph::store::Store;
 use sparesults::{QueryResultsFormat, QueryResultsSerializer};
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::fmt;
-use std::io::{self, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::time::Instant;
 use url::form_urlencoded;
 
 const MAX_SPARQL_BODY_SIZE: u64 = 0x0010_0000;
 
-#[derive(Copy, Clone)]
-enum GraphOrDatasetFormat {
-    Graph(GraphFormat),
-    Dataset(DatasetFormat),
-}
-
-impl GraphOrDatasetFormat {
-    fn from_extension(name: &str) -> anyhow::Result<Self> {
-        Ok(match (GraphFormat::from_extension(name), DatasetFormat::from_extension(name)) {
-            (Some(g), Some(d)) => bail!("The file extension '{name}' can be resolved to both '{}' and '{}', not sure what to pick", g.file_extension(), d.file_extension()),
-            (Some(g), None) => Self::Graph(g),
-            (None, Some(d)) => Self::Dataset(d),
-            (None, None) =>
-            bail!("The file extension '{name}' is unknown")
-        })
-    }
-
-    fn from_media_type(name: &str) -> anyhow::Result<Self> {
-        Ok(
-            match (
-                GraphFormat::from_media_type(name),
-                DatasetFormat::from_media_type(name),
-            ) {
-                (Some(g), Some(d)) => bail!(
-                "The media type '{name}' can be resolved to both '{}' and '{}', not sure what to pick",
-                g.file_extension(),
-                d.file_extension()
-            ),
-                (Some(g), None) => Self::Graph(g),
-                (None, Some(d)) => Self::Dataset(d),
-                (None, None) => bail!("The media type '{name}' is unknown"),
-            },
-        )
-    }
-}
-
-impl FromStr for GraphOrDatasetFormat {
-    type Err = Error;
-
-    fn from_str(name: &str) -> anyhow::Result<Self> {
-        if let Ok(t) = Self::from_extension(name) {
-            return Ok(t);
-        }
-        if let Ok(t) = Self::from_media_type(name) {
-            return Ok(t);
-        }
-        bail!("The file format '{name}' is unknown")
-    }
-}
-
 type HttpError = (Status, String);
 
-pub fn handle_request(
-    request: &mut Request,
-    store: Store,
-    read_only: bool,
-) -> Result<Response, HttpError> {
-    match (request.url().path(), request.method().as_ref()) {
-        ("/query", "GET") => {
-            configure_and_evaluate_sparql_query(&store, &[url_query(request)], None, request)
-        }
-        ("/query", "POST") => {
+pub fn handle_request(request: &mut Request, store: Store) -> Result<Response, HttpError> {
+    match request.method().as_ref() {
+        "GET" => configure_and_evaluate_sparql_query(&store, &[url_query(request)], None, request),
+        "POST" => {
             let content_type =
                 content_type(request).ok_or_else(|| bad_request("No Content-Type given"))?;
             if content_type == "application/sparql-query" {
@@ -116,218 +55,9 @@ pub fn handle_request(
                 Err(unsupported_media_type(&content_type))
             }
         }
-        ("/update", "POST") => {
-            if read_only {
-                return Err(the_server_is_read_only());
-            }
-            let content_type =
-                content_type(request).ok_or_else(|| bad_request("No Content-Type given"))?;
-            if content_type == "application/sparql-update" {
-                let mut buffer = String::new();
-                request
-                    .body_mut()
-                    .take(MAX_SPARQL_BODY_SIZE)
-                    .read_to_string(&mut buffer)
-                    .map_err(bad_request)?;
-                configure_and_evaluate_sparql_update(
-                    &store,
-                    &[url_query(request)],
-                    Some(buffer),
-                    request,
-                )
-            } else if content_type == "application/x-www-form-urlencoded" {
-                let mut buffer = Vec::new();
-                request
-                    .body_mut()
-                    .take(MAX_SPARQL_BODY_SIZE)
-                    .read_to_end(&mut buffer)
-                    .map_err(bad_request)?;
-                configure_and_evaluate_sparql_update(
-                    &store,
-                    &[url_query(request), &buffer],
-                    None,
-                    request,
-                )
-            } else {
-                Err(unsupported_media_type(&content_type))
-            }
-        }
-        (path, "GET") if path.starts_with("/store") => {
-            if let Some(target) = store_target(request)? {
-                assert_that_graph_exists(&store, &target)?;
-                let format = graph_content_negotiation(request)?;
-                let triples = store.quads_for_pattern(
-                    None,
-                    None,
-                    None,
-                    Some(GraphName::from(target).as_ref()),
-                );
-                ReadForWrite::build_response(
-                    move |w| {
-                        Ok((
-                            GraphSerializer::from_format(format).triple_writer(w)?,
-                            triples,
-                        ))
-                    },
-                    |(mut writer, mut triples)| {
-                        Ok(if let Some(t) = triples.next() {
-                            writer.write(&t?.into())?;
-                            Some((writer, triples))
-                        } else {
-                            writer.finish()?;
-                            None
-                        })
-                    },
-                    format.media_type(),
-                )
-            } else {
-                let format = dataset_content_negotiation(request)?;
-                ReadForWrite::build_response(
-                    move |w| {
-                        Ok((
-                            DatasetSerializer::from_format(format).quad_writer(w)?,
-                            store.iter(),
-                        ))
-                    },
-                    |(mut writer, mut quads)| {
-                        Ok(if let Some(q) = quads.next() {
-                            writer.write(&q?)?;
-                            Some((writer, quads))
-                        } else {
-                            writer.finish()?;
-                            None
-                        })
-                    },
-                    format.media_type(),
-                )
-            }
-        }
-        (path, "PUT") if path.starts_with("/store") => {
-            if read_only {
-                return Err(the_server_is_read_only());
-            }
-            let content_type =
-                content_type(request).ok_or_else(|| bad_request("No Content-Type given"))?;
-            if let Some(target) = store_target(request)? {
-                let format = GraphFormat::from_media_type(&content_type)
-                    .ok_or_else(|| unsupported_media_type(&content_type))?;
-                let new = !match &target {
-                    NamedGraphName::NamedNode(target) => {
-                        if store
-                            .contains_named_graph(target)
-                            .map_err(internal_server_error)?
-                        {
-                            store.clear_graph(target).map_err(internal_server_error)?;
-                            true
-                        } else {
-                            store
-                                .insert_named_graph(target)
-                                .map_err(internal_server_error)?;
-                            false
-                        }
-                    }
-                    NamedGraphName::DefaultGraph => {
-                        store
-                            .clear_graph(GraphNameRef::DefaultGraph)
-                            .map_err(internal_server_error)?;
-                        true
-                    }
-                };
-                web_load_graph(&store, request, format, GraphName::from(target).as_ref())?;
-                Ok(Response::builder(if new {
-                    Status::CREATED
-                } else {
-                    Status::NO_CONTENT
-                })
-                .build())
-            } else {
-                let format = DatasetFormat::from_media_type(&content_type)
-                    .ok_or_else(|| unsupported_media_type(&content_type))?;
-                store.clear().map_err(internal_server_error)?;
-                web_load_dataset(&store, request, format)?;
-                Ok(Response::builder(Status::NO_CONTENT).build())
-            }
-        }
-        (path, "DELETE") if path.starts_with("/store") => {
-            if read_only {
-                return Err(the_server_is_read_only());
-            }
-            if let Some(target) = store_target(request)? {
-                match target {
-                    NamedGraphName::DefaultGraph => store
-                        .clear_graph(GraphNameRef::DefaultGraph)
-                        .map_err(internal_server_error)?,
-                    NamedGraphName::NamedNode(target) => {
-                        if store
-                            .contains_named_graph(&target)
-                            .map_err(internal_server_error)?
-                        {
-                            store
-                                .remove_named_graph(&target)
-                                .map_err(internal_server_error)?;
-                        } else {
-                            return Err((
-                                Status::NOT_FOUND,
-                                format!("The graph {target} does not exists"),
-                            ));
-                        }
-                    }
-                }
-            } else {
-                store.clear().map_err(internal_server_error)?;
-            }
-            Ok(Response::builder(Status::NO_CONTENT).build())
-        }
-        (path, "POST") if path.starts_with("/store") => {
-            if read_only {
-                return Err(the_server_is_read_only());
-            }
-            let content_type =
-                content_type(request).ok_or_else(|| bad_request("No Content-Type given"))?;
-            if let Some(target) = store_target(request)? {
-                let format = GraphFormat::from_media_type(&content_type)
-                    .ok_or_else(|| unsupported_media_type(&content_type))?;
-                let new = assert_that_graph_exists(&store, &target).is_ok();
-                web_load_graph(&store, request, format, GraphName::from(target).as_ref())?;
-                Ok(Response::builder(if new {
-                    Status::CREATED
-                } else {
-                    Status::NO_CONTENT
-                })
-                .build())
-            } else {
-                match GraphOrDatasetFormat::from_media_type(&content_type)
-                    .map_err(|_| unsupported_media_type(&content_type))?
-                {
-                    GraphOrDatasetFormat::Graph(format) => {
-                        let graph =
-                            resolve_with_base(request, &format!("/store/{:x}", random::<u128>()))?;
-                        web_load_graph(&store, request, format, graph.as_ref().into())?;
-                        Ok(Response::builder(Status::CREATED)
-                            .with_header(HeaderName::LOCATION, graph.into_string())
-                            .unwrap()
-                            .build())
-                    }
-                    GraphOrDatasetFormat::Dataset(format) => {
-                        web_load_dataset(&store, request, format)?;
-                        Ok(Response::builder(Status::NO_CONTENT).build())
-                    }
-                }
-            }
-        }
-        (path, "HEAD") if path.starts_with("/store") => {
-            if let Some(target) = store_target(request)? {
-                assert_that_graph_exists(&store, &target)?;
-            }
-            Ok(Response::builder(Status::OK).build())
-        }
         _ => Err((
-            Status::NOT_FOUND,
-            format!(
-                "{} {} is not supported by this server",
-                request.method(),
-                request.url().path()
-            ),
+            Status::METHOD_NOT_ALLOWED,
+            format!("{} is not supported by this server", request.method()),
         )),
     }
 }
@@ -339,26 +69,8 @@ fn base_url(request: &Request) -> String {
     url.into()
 }
 
-fn resolve_with_base(request: &Request, url: &str) -> Result<NamedNode, HttpError> {
-    Ok(NamedNode::new_unchecked(
-        Iri::parse(base_url(request))
-            .map_err(bad_request)?
-            .resolve(url)
-            .map_err(bad_request)?
-            .into_inner(),
-    ))
-}
-
 fn url_query(request: &Request) -> &[u8] {
     request.url().query().unwrap_or("").as_bytes()
-}
-
-fn url_query_parameter<'a>(request: &'a Request, param: &str) -> Option<Cow<'a, str>> {
-    request
-        .url()
-        .query_pairs()
-        .find(|(k, _)| k == param)
-        .map(|(_, v)| v)
 }
 
 fn configure_and_evaluate_sparql_query(
@@ -490,159 +202,6 @@ fn evaluate_sparql_query(
     }
 }
 
-fn configure_and_evaluate_sparql_update(
-    store: &Store,
-    encoded: &[&[u8]],
-    mut update: Option<String>,
-    request: &Request,
-) -> Result<Response, HttpError> {
-    let mut use_default_graph_as_union = false;
-    let mut default_graph_uris = Vec::new();
-    let mut named_graph_uris = Vec::new();
-    for encoded in encoded {
-        for (k, v) in form_urlencoded::parse(encoded) {
-            match k.as_ref() {
-                "update" => {
-                    if update.is_some() {
-                        return Err(bad_request("Multiple update parameters provided"));
-                    }
-                    update = Some(v.into_owned())
-                }
-                "using-graph-uri" => default_graph_uris.push(v.into_owned()),
-                "using-union-graph" => use_default_graph_as_union = true,
-                "using-named-graph-uri" => named_graph_uris.push(v.into_owned()),
-                _ => (),
-            }
-        }
-    }
-    let update = update.ok_or_else(|| bad_request("You should set the 'update' parameter"))?;
-    evaluate_sparql_update(
-        store,
-        &update,
-        use_default_graph_as_union,
-        default_graph_uris,
-        named_graph_uris,
-        request,
-    )
-}
-
-fn evaluate_sparql_update(
-    store: &Store,
-    update: &str,
-    use_default_graph_as_union: bool,
-    default_graph_uris: Vec<String>,
-    named_graph_uris: Vec<String>,
-    request: &Request,
-) -> Result<Response, HttpError> {
-    let mut update =
-        Update::parse(update, Some(base_url(request).as_str())).map_err(bad_request)?;
-
-    if use_default_graph_as_union {
-        if !default_graph_uris.is_empty() || !named_graph_uris.is_empty() {
-            return Err(bad_request(
-                "using-graph-uri or using-named-graph-uri and using-union-graph should not be set at the same time"
-            ));
-        }
-        for using in update.using_datasets_mut() {
-            if !using.is_default_dataset() {
-                return Err(bad_request(
-                    "using-union-graph must not be used with a SPARQL UPDATE containing USING",
-                ));
-            }
-            using.set_default_graph_as_union();
-        }
-    } else if !default_graph_uris.is_empty() || !named_graph_uris.is_empty() {
-        let default_graph_uris = default_graph_uris
-            .into_iter()
-            .map(|e| Ok(NamedNode::new(e)?.into()))
-            .collect::<Result<Vec<GraphName>, IriParseError>>()
-            .map_err(bad_request)?;
-        let named_graph_uris = named_graph_uris
-            .into_iter()
-            .map(|e| Ok(NamedNode::new(e)?.into()))
-            .collect::<Result<Vec<NamedOrBlankNode>, IriParseError>>()
-            .map_err(bad_request)?;
-        for using in update.using_datasets_mut() {
-            if !using.is_default_dataset() {
-                return Err(bad_request(
-                        "using-graph-uri and using-named-graph-uri must not be used with a SPARQL UPDATE containing USING",
-                    ));
-            }
-            using.set_default_graph(default_graph_uris.clone());
-            using.set_available_named_graphs(named_graph_uris.clone());
-        }
-    }
-    store.update(update).map_err(internal_server_error)?;
-    Ok(Response::builder(Status::NO_CONTENT).build())
-}
-
-fn store_target(request: &Request) -> Result<Option<NamedGraphName>, HttpError> {
-    if request.url().path() == "/store" {
-        let mut graph = None;
-        let mut default = false;
-        for (k, v) in request.url().query_pairs() {
-            match k.as_ref() {
-                "graph" => graph = Some(v.into_owned()),
-                "default" => default = true,
-                _ => continue,
-            }
-        }
-        if let Some(graph) = graph {
-            if default {
-                Err(bad_request(
-                    "Both graph and default parameters should not be set at the same time",
-                ))
-            } else {
-                Ok(Some(NamedGraphName::NamedNode(resolve_with_base(
-                    request, &graph,
-                )?)))
-            }
-        } else if default {
-            Ok(Some(NamedGraphName::DefaultGraph))
-        } else {
-            Ok(None)
-        }
-    } else {
-        Ok(Some(NamedGraphName::NamedNode(resolve_with_base(
-            request, "",
-        )?)))
-    }
-}
-
-fn assert_that_graph_exists(store: &Store, target: &NamedGraphName) -> Result<(), HttpError> {
-    if match target {
-        NamedGraphName::DefaultGraph => true,
-        NamedGraphName::NamedNode(target) => store
-            .contains_named_graph(target)
-            .map_err(internal_server_error)?,
-    } {
-        Ok(())
-    } else {
-        Err((
-            Status::NOT_FOUND,
-            format!(
-                "The graph {} does not exists",
-                GraphName::from(target.clone())
-            ),
-        ))
-    }
-}
-
-#[derive(Eq, PartialEq, Debug, Clone, Hash)]
-enum NamedGraphName {
-    NamedNode(NamedNode),
-    DefaultGraph,
-}
-
-impl From<NamedGraphName> for GraphName {
-    fn from(graph_name: NamedGraphName) -> Self {
-        match graph_name {
-            NamedGraphName::NamedNode(node) => node.into(),
-            NamedGraphName::DefaultGraph => Self::DefaultGraph,
-        }
-    }
-}
-
 fn graph_content_negotiation(request: &Request) -> Result<GraphFormat, HttpError> {
     content_negotiation(
         request,
@@ -652,17 +211,6 @@ fn graph_content_negotiation(request: &Request) -> Result<GraphFormat, HttpError
             GraphFormat::RdfXml.media_type(),
         ],
         GraphFormat::from_media_type,
-    )
-}
-
-fn dataset_content_negotiation(request: &Request) -> Result<DatasetFormat, HttpError> {
-    content_negotiation(
-        request,
-        &[
-            DatasetFormat::NQuads.media_type(),
-            DatasetFormat::TriG.media_type(),
-        ],
-        DatasetFormat::from_media_type,
     )
 }
 
@@ -756,78 +304,8 @@ fn content_type(request: &Request) -> Option<String> {
     )
 }
 
-fn web_load_graph(
-    store: &Store,
-    request: &mut Request,
-    format: GraphFormat,
-    to_graph_name: GraphNameRef<'_>,
-) -> Result<(), HttpError> {
-    let base_iri = if let GraphNameRef::NamedNode(graph_name) = to_graph_name {
-        Some(graph_name.as_str())
-    } else {
-        None
-    };
-    if url_query_parameter(request, "no_transaction").is_some() {
-        web_bulk_loader(store, request).load_graph(
-            BufReader::new(request.body_mut()),
-            format,
-            to_graph_name,
-            base_iri,
-        )
-    } else {
-        store.load_graph(
-            BufReader::new(request.body_mut()),
-            format,
-            to_graph_name,
-            base_iri,
-        )
-    }
-    .map_err(loader_to_http_error)
-}
-
-fn web_load_dataset(
-    store: &Store,
-    request: &mut Request,
-    format: DatasetFormat,
-) -> Result<(), HttpError> {
-    if url_query_parameter(request, "no_transaction").is_some() {
-        web_bulk_loader(store, request).load_dataset(
-            BufReader::new(request.body_mut()),
-            format,
-            None,
-        )
-    } else {
-        store.load_dataset(BufReader::new(request.body_mut()), format, None)
-    }
-    .map_err(loader_to_http_error)
-}
-
-fn web_bulk_loader(store: &Store, request: &Request) -> BulkLoader {
-    let start = Instant::now();
-    let mut loader = store.bulk_loader().on_progress(move |size| {
-        let elapsed = start.elapsed();
-        eprintln!(
-            "{} triples loaded in {}s ({} t/s)",
-            size,
-            elapsed.as_secs(),
-            ((size as f64) / elapsed.as_secs_f64()).round()
-        )
-    });
-    if url_query_parameter(request, "lenient").is_some() {
-        loader = loader.on_parse_error(move |e| {
-            eprintln!("Parsing error: {e}");
-            Ok(())
-        })
-    }
-    loader
-}
-
 fn bad_request(message: impl fmt::Display) -> HttpError {
     (Status::BAD_REQUEST, message.to_string())
-}
-
-fn the_server_is_read_only() -> HttpError {
-    (Status::FORBIDDEN, "The server is read-only".into())
 }
 
 fn unsupported_media_type(content_type: &str) -> HttpError {
@@ -840,13 +318,6 @@ fn unsupported_media_type(content_type: &str) -> HttpError {
 fn internal_server_error(message: impl fmt::Display) -> HttpError {
     eprintln!("Internal server error: {message}");
     (Status::INTERNAL_SERVER_ERROR, message.to_string())
-}
-
-fn loader_to_http_error(e: LoaderError) -> HttpError {
-    match e {
-        LoaderError::Parsing(e) => bad_request(e),
-        LoaderError::Storage(e) => internal_server_error(e),
-    }
 }
 
 /// Hacky tool to allow implementing read on top of a write loop

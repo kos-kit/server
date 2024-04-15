@@ -2,10 +2,10 @@
 
 #![allow(clippy::print_stderr, clippy::cast_precision_loss, clippy::use_debug)]
 use clap::Parser;
+use kos_kit_server::{cors, sparql};
 use oxhttp::model::{HeaderName, Response, Status};
 use oxhttp::Server;
 use oxigraph::store::Store;
-use server::{cors, sparql};
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -29,10 +29,6 @@ struct Args {
     /// If not present. An in-memory storage will be used.
     #[arg(short, long)]
     location: Option<PathBuf>,
-
-    /// Start Oxigraph HTTP server in read-only mode.
-    #[arg(long)]
-    read_only: bool,
 }
 
 fn error(status: Status, message: impl fmt::Display) -> Response {
@@ -53,12 +49,12 @@ pub fn main() -> anyhow::Result<()> {
 
     let mut server = if args.cors {
         Server::new(cors::middleware(move |request| {
-            sparql::handle_request(request, store.clone(), args.read_only)
+            sparql::handle_request(request, store.clone())
                 .unwrap_or_else(|(status, message)| error(status, message))
         }))
     } else {
         Server::new(move |request| {
-            sparql::handle_request(request, store.clone(), args.read_only)
+            sparql::handle_request(request, store.clone())
                 .unwrap_or_else(|(status, message)| error(status, message))
         })
     };
