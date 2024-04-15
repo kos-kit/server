@@ -51,7 +51,9 @@ pub fn main() -> anyhow::Result<()> {
         Store::new()
     }?;
 
-    init::init(args.init_path, store.clone())?;
+    if store.is_empty()? {
+        init::init(args.init_path, store.clone())?
+    }
 
     let mut server = if args.cors {
         Server::new(cors::middleware(move |request| {
