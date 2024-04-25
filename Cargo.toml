@@ -14,4 +14,5 @@ oxhttp = { version = "0.1", features = ["rayon"] }
 oxigraph = { version = "0.3.22" }
 rayon-core = "1"
 sparesults = { version = "0.1.8", features = ["rdf-star"] }
+tantivy = "0.22.0"
 url = "2"

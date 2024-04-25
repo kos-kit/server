@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::thread::available_parallelism;
 use std::time::Instant;
+use tantivy::Index;
 
 #[derive(Copy, Clone)]
 enum GraphOrDatasetFormat {
@@ -34,6 +35,20 @@ impl GraphOrDatasetFormat {
     }
 }
 
+fn bulk_load_oxigraph(
+    loader: &BulkLoader,
+    reader: impl BufRead,
+    format: GraphOrDatasetFormat,
+) -> anyhow::Result<()> {
+    match format {
+        GraphOrDatasetFormat::Graph(format) => {
+            loader.load_graph(reader, format, GraphNameRef::DefaultGraph, None)?
+        }
+        GraphOrDatasetFormat::Dataset(format) => loader.load_dataset(reader, format, None)?,
+    }
+    Ok(())
+}
+
 fn format_from_path<T>(
     path: &Path,
     from_extension: impl FnOnce(&str) -> anyhow::Result<T>,
@@ -52,25 +67,16 @@ fn format_from_path<T>(
     }
 }
 
-fn bulk_load_oxigraph(
-    loader: &BulkLoader,
-    reader: impl BufRead,
-    format: GraphOrDatasetFormat,
-) -> anyhow::Result<()> {
-    match format {
-        GraphOrDatasetFormat::Graph(format) => {
-            loader.load_graph(reader, format, GraphNameRef::DefaultGraph, None)?
-        }
-        GraphOrDatasetFormat::Dataset(format) => loader.load_dataset(reader, format, None)?,
-    }
+pub fn init(index: Index, init_path: PathBuf, oxigraph_store: &Store) -> anyhow::Result<()> {
+    init_oxigraph(init_path, oxigraph_store)?;
+    init_index(index, oxigraph_store)
+}
+
+fn init_index(index: Index, oxigraph_store: &Store) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn init(directory_path: PathBuf, store: Store) -> anyhow::Result<()> {
-    init_oxigraph(directory_path, store)
-}
-
-fn init_oxigraph(init_path: PathBuf, store: Store) -> anyhow::Result<()> {
+fn init_oxigraph(init_path: PathBuf, store: &Store) -> anyhow::Result<()> {
     let file_paths = if fs::metadata(init_path.clone())?.is_file() {
         vec![init_path]
     } else {
