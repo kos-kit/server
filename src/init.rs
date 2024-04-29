@@ -85,6 +85,8 @@ fn init_index(
     index_init_sparql: String,
     oxigraph_store: &Store,
 ) -> anyhow::Result<()> {
+    eprintln!("building Tantivy index");
+
     let iri_field = index.schema().get_field("iri")?;
     let text_field = index.schema().get_field("text")?;
 
@@ -106,6 +108,9 @@ fn init_index(
             }
         }
     }
+
+    eprintln!("built Tantivy index");
+
     Ok(())
 }
 
@@ -123,6 +128,8 @@ fn init_oxigraph(init_path: PathBuf, store: &Store) -> anyhow::Result<()> {
             .map(|dir_entry| dir_entry.path())
             .collect::<Vec<_>>()
     };
+
+    eprintln!("bulk-loading Oxigraph");
 
     ThreadPoolBuilder::new()
         .num_threads(max(1, available_parallelism()?.get() / 2))
@@ -185,6 +192,8 @@ fn init_oxigraph(init_path: PathBuf, store: &Store) -> anyhow::Result<()> {
             }
         });
     store.flush()?;
+
+    eprintln!("bulk-loaded Oxigraph");
 
     Ok(())
 }
