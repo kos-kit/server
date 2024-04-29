@@ -2,6 +2,9 @@ use anyhow::{self, bail};
 use flate2::read::MultiGzDecoder;
 use oxigraph::io::{DatasetFormat, GraphFormat};
 use oxigraph::model::GraphNameRef;
+use oxigraph::model::Term::Literal;
+use oxigraph::model::Term::NamedNode;
+use oxigraph::sparql::QueryResults;
 use oxigraph::store::{BulkLoader, Store};
 use rayon_core::ThreadPoolBuilder;
 use std::cmp::max;
@@ -11,7 +14,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::thread::available_parallelism;
 use std::time::Instant;
-use tantivy::Index;
+use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 
 #[derive(Copy, Clone)]
 enum GraphOrDatasetFormat {
@@ -67,12 +70,42 @@ fn format_from_path<T>(
     }
 }
 
-pub fn init(index: Index, init_path: PathBuf, oxigraph_store: &Store) -> anyhow::Result<()> {
+pub fn init(
+    index: &Index,
+    index_init_sparql: String,
+    init_path: PathBuf,
+    oxigraph_store: &Store,
+) -> anyhow::Result<()> {
     init_oxigraph(init_path, oxigraph_store)?;
-    init_index(index, oxigraph_store)
+    init_index(index, index_init_sparql, oxigraph_store)
 }
 
-fn init_index(index: Index, oxigraph_store: &Store) -> anyhow::Result<()> {
+fn init_index(
+    index: &Index,
+    index_init_sparql: String,
+    oxigraph_store: &Store,
+) -> anyhow::Result<()> {
+    let iri_field = index.schema().get_field("iri")?;
+    let text_field = index.schema().get_field("text")?;
+
+    let index_writer: IndexWriter<TantivyDocument> = index.writer(50_000_000)?;
+    if let QueryResults::Solutions(solutions) = oxigraph_store.query(index_init_sparql.as_str())? {
+        for solution in solutions.filter_map(|s| s.ok()) {
+            if let Some(iri_term) = solution.get("iri") {
+                if let NamedNode(iri) = iri_term {
+                    if let Some(text_term) = solution.get("text") {
+                        if let Literal(text_literal) = text_term {
+                            index_writer.add_document(doc!(
+                                iri_field => iri.to_string(),
+                                text_field => text_literal.value()
+                            ))?;
+                            // println!("IRI: {}, text: {}", iri.to_string(), text_literal.value());
+                        }
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 

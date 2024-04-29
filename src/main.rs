@@ -2,7 +2,7 @@
 
 #![allow(clippy::print_stderr, clippy::cast_precision_loss, clippy::use_debug)]
 use clap::Parser;
-use kos_kit_server::index::{self, index};
+use kos_kit_server::index::{self};
 use kos_kit_server::{cors, init, sparql};
 use oxhttp::model::{HeaderName, Response, Status};
 use oxhttp::Server;
@@ -12,7 +12,6 @@ use std::time::Duration;
 use std::{fmt, fs};
 use tantivy::directory::MmapDirectory;
 use tantivy::Index;
-use tempfile::TempDir;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -80,7 +79,7 @@ pub fn main() -> anyhow::Result<()> {
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 
-SELECT DISTINCT ?iri, ?text 
+SELECT DISTINCT ?iri ?text
 WHERE { 
     { ?iri rdfs:label ?text }
     UNION
@@ -100,7 +99,7 @@ WHERE {
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 
-CONSTRUCT WHERE { 
+CONSTRUCT WHERE {
     { ?iri rdfs:label ?text }
     UNION
     { ?iri skos:prefLabel ?text }
@@ -117,7 +116,7 @@ CONSTRUCT WHERE {
     }?;
 
     if store.is_empty()? {
-        init::init(&index, args.init_path, &store)?
+        init::init(&index_, index_init_sparql, args.oxigraph_init_path, &store)?
     } else {
         eprintln!("Oxigraph/Tantivy is not empty, skipping init")
     }
