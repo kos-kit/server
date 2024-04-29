@@ -11,7 +11,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::{fmt, fs};
 use tantivy::directory::MmapDirectory;
-use tantivy::Index;
+use tantivy::query::QueryParser;
+use tantivy::{Index, IndexReader, ReloadPolicy};
 
 type HttpError = (Status, String);
 
@@ -74,7 +75,7 @@ pub fn main() -> anyhow::Result<()> {
 
     let mut tantivy_index_schema_builder = Schema::builder();
     tantivy_index_schema_builder.add_text_field("iri", STRING | STORED);
-    tantivy_index_schema_builder.add_text_field("text", TEXT);
+    let tantivy_index_text_field = tantivy_index_schema_builder.add_text_field("text", TEXT);
     let tantivy_index_schema = tantivy_index_schema_builder.build();
 
     let tantivy_index =
@@ -132,9 +133,17 @@ CONSTRUCT WHERE {
         eprintln!("Oxigraph/Tantivy is not empty, skipping init")
     }
 
-    if tantivy_index.reader()?.searcher().num_docs() == 0 {
+    let tantivy_index_reader = tantivy_index
+        .reader_builder()
+        .reload_policy(ReloadPolicy::Manual)
+        .try_into()?;
+
+    if tantivy_index_reader.searcher().num_docs() == 0 {
         init_tantivy_index(&tantivy_index, index_init_sparql, &oxigraph_store)?
     }
+
+    let tantivy_query_parser =
+        QueryParser::for_index(&tantivy_index, vec![tantivy_index_text_field]);
 
     let mut server = if args.cors {
         Server::new(cors::middleware(move |request| {
@@ -142,7 +151,8 @@ CONSTRUCT WHERE {
                 index_result_sparql.clone(),
                 request,
                 oxigraph_store.clone(),
-                tantivy_index.clone(),
+                tantivy_index_reader.clone(),
+                tantivy_query_parser.clone(),
             )
             .unwrap_or_else(|(status, message)| error(status, message))
         }))
@@ -152,7 +162,8 @@ CONSTRUCT WHERE {
                 index_result_sparql.clone(),
                 request,
                 oxigraph_store.clone(),
-                tantivy_index.clone(),
+                tantivy_index_reader.clone(),
+                tantivy_query_parser.clone(),
             )
             .unwrap_or_else(|(status, message)| error(status, message))
         })
@@ -168,10 +179,17 @@ pub fn handle_request(
     index_result_sparql: String,
     request: &mut Request,
     oxigraph_store: Store,
-    tantivy_index: Index,
+    tantivy_index_reader: IndexReader,
+    tantivy_query_parser: QueryParser,
 ) -> Result<Response, HttpError> {
     match request.url().path() {
-        "/search" => search::handle_request(index_result_sparql, request, tantivy_index),
+        "/search" => search::handle_request(
+            index_result_sparql,
+            oxigraph_store,
+            request,
+            tantivy_index_reader,
+            tantivy_query_parser,
+        ),
         "/sparql" => sparql::handle_request(request, oxigraph_store),
         _ => Err((
             Status::NOT_FOUND,
