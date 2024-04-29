@@ -2,9 +2,9 @@
 
 #![allow(clippy::print_stderr, clippy::cast_precision_loss, clippy::use_debug)]
 use clap::Parser;
-use kos_kit_server::index::{self};
-use kos_kit_server::{cors, init, sparql};
-use oxhttp::model::{HeaderName, Response, Status};
+use kos_kit_server::init::{init_oxigraph_store, init_tantivy_index};
+use kos_kit_server::{cors, search, sparql};
+use oxhttp::model::{HeaderName, Request, Response, Status};
 use oxhttp::Server;
 use oxigraph::store::Store;
 use std::path::PathBuf;
@@ -12,6 +12,8 @@ use std::time::Duration;
 use std::{fmt, fs};
 use tantivy::directory::MmapDirectory;
 use tantivy::Index;
+
+type HttpError = (Status, String);
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -26,11 +28,6 @@ struct Args {
     /// Allows cross-origin requests
     #[arg(long)]
     cors: bool,
-
-    /// Directory in which the Tantivy index should be persisted.
-    /// If not present, use a temporary directory
-    #[arg(long)]
-    index_data_directory_path: Option<PathBuf>,
 
     // Path to a .sparql file containing a query to initialize the index
     #[arg(long)]
@@ -49,6 +46,11 @@ struct Args {
     /// Path to an RDF files or a directory of RDF files to load into Oxigraph
     #[arg(long, required = true)]
     oxigraph_init_path: PathBuf,
+
+    /// Directory in which the Tantivy index should be persisted.
+    /// If not present, use a temporary directory
+    #[arg(long)]
+    tantivy_index_data_directory_path: Option<PathBuf>,
 }
 
 fn error(status: Status, message: impl fmt::Display) -> Response {
@@ -61,14 +63,29 @@ fn error(status: Status, message: impl fmt::Display) -> Response {
 pub fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let index_ = if let Some(index_data_directory_path) = args.index_data_directory_path {
-        Index::open_or_create(
-            MmapDirectory::open(index_data_directory_path)?,
-            index::schema()?,
-        )?
-    } else {
-        Index::create_in_ram(index::schema()?)
-    };
+    let oxigraph_store =
+        if let Some(oxigraph_data_directory_path) = args.oxigraph_data_directory_path {
+            Store::open(oxigraph_data_directory_path)
+        } else {
+            Store::new()
+        }?;
+
+    use tantivy::schema::{Schema, STORED, STRING, TEXT};
+
+    let mut tantivy_index_schema_builder = Schema::builder();
+    tantivy_index_schema_builder.add_text_field("iri", STRING | STORED);
+    tantivy_index_schema_builder.add_text_field("text", TEXT);
+    let tantivy_index_schema = tantivy_index_schema_builder.build();
+
+    let tantivy_index =
+        if let Some(index_data_directory_path) = args.tantivy_index_data_directory_path {
+            Index::open_or_create(
+                MmapDirectory::open(index_data_directory_path)?,
+                tantivy_index_schema,
+            )?
+        } else {
+            Index::create_in_ram(tantivy_index_schema)
+        };
 
     let index_init_sparql =
         if let Some(index_init_sparql_file_path) = args.index_init_sparql_file_path {
@@ -109,27 +126,35 @@ CONSTRUCT WHERE {
             )
         };
 
-    let store = if let Some(oxigraph_data_directory_path) = args.oxigraph_data_directory_path {
-        Store::open(oxigraph_data_directory_path)
-    } else {
-        Store::new()
-    }?;
-
-    if store.is_empty()? {
-        init::init(&index_, index_init_sparql, args.oxigraph_init_path, &store)?
+    if oxigraph_store.is_empty()? {
+        init_oxigraph_store(args.oxigraph_init_path, &oxigraph_store)?
     } else {
         eprintln!("Oxigraph/Tantivy is not empty, skipping init")
     }
 
+    if tantivy_index.reader()?.searcher().num_docs() == 0 {
+        init_tantivy_index(&tantivy_index, index_init_sparql, &oxigraph_store)?
+    }
+
     let mut server = if args.cors {
         Server::new(cors::middleware(move |request| {
-            sparql::handle_request(request, store.clone())
-                .unwrap_or_else(|(status, message)| error(status, message))
+            handle_request(
+                index_result_sparql.clone(),
+                request,
+                oxigraph_store.clone(),
+                tantivy_index.clone(),
+            )
+            .unwrap_or_else(|(status, message)| error(status, message))
         }))
     } else {
         Server::new(move |request| {
-            sparql::handle_request(request, store.clone())
-                .unwrap_or_else(|(status, message)| error(status, message))
+            handle_request(
+                index_result_sparql.clone(),
+                request,
+                oxigraph_store.clone(),
+                tantivy_index.clone(),
+            )
+            .unwrap_or_else(|(status, message)| error(status, message))
         })
     };
     server.set_global_timeout(HTTP_TIMEOUT);
@@ -137,4 +162,24 @@ CONSTRUCT WHERE {
     eprintln!("Listening for requests at http://{}", &args.bind);
     server.listen(args.bind)?;
     Ok(())
+}
+
+pub fn handle_request(
+    index_result_sparql: String,
+    request: &mut Request,
+    oxigraph_store: Store,
+    tantivy_index: Index,
+) -> Result<Response, HttpError> {
+    match request.url().path() {
+        "/search" => search::handle_request(index_result_sparql, request, tantivy_index),
+        "/sparql" => sparql::handle_request(request, oxigraph_store),
+        _ => Err((
+            Status::NOT_FOUND,
+            format!(
+                "{} {} is not supported by this server",
+                request.method(),
+                request.url().path()
+            ),
+        )),
+    }
 }

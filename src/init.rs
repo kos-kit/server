@@ -70,51 +70,7 @@ fn format_from_path<T>(
     }
 }
 
-pub fn init(
-    index: &Index,
-    index_init_sparql: String,
-    init_path: PathBuf,
-    oxigraph_store: &Store,
-) -> anyhow::Result<()> {
-    init_oxigraph(init_path, oxigraph_store)?;
-    init_index(index, index_init_sparql, oxigraph_store)
-}
-
-fn init_index(
-    index: &Index,
-    index_init_sparql: String,
-    oxigraph_store: &Store,
-) -> anyhow::Result<()> {
-    eprintln!("building Tantivy index");
-
-    let iri_field = index.schema().get_field("iri")?;
-    let text_field = index.schema().get_field("text")?;
-
-    let index_writer: IndexWriter<TantivyDocument> = index.writer(50_000_000)?;
-    if let QueryResults::Solutions(solutions) = oxigraph_store.query(index_init_sparql.as_str())? {
-        for solution in solutions.filter_map(|s| s.ok()) {
-            if let Some(iri_term) = solution.get("iri") {
-                if let NamedNode(iri) = iri_term {
-                    if let Some(text_term) = solution.get("text") {
-                        if let Literal(text_literal) = text_term {
-                            index_writer.add_document(doc!(
-                                iri_field => iri.to_string(),
-                                text_field => text_literal.value()
-                            ))?;
-                            // println!("IRI: {}, text: {}", iri.to_string(), text_literal.value());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    eprintln!("built Tantivy index");
-
-    Ok(())
-}
-
-fn init_oxigraph(init_path: PathBuf, store: &Store) -> anyhow::Result<()> {
+pub fn init_oxigraph_store(init_path: PathBuf, store: &Store) -> anyhow::Result<()> {
     let file_paths = if fs::metadata(init_path.clone())?.is_file() {
         vec![init_path]
     } else {
@@ -194,6 +150,40 @@ fn init_oxigraph(init_path: PathBuf, store: &Store) -> anyhow::Result<()> {
     store.flush()?;
 
     eprintln!("bulk-loaded Oxigraph");
+
+    Ok(())
+}
+
+pub fn init_tantivy_index(
+    index: &Index,
+    index_init_sparql: String,
+    oxigraph_store: &Store,
+) -> anyhow::Result<()> {
+    eprintln!("building Tantivy index");
+
+    let iri_field = index.schema().get_field("iri")?;
+    let text_field = index.schema().get_field("text")?;
+
+    let index_writer: IndexWriter<TantivyDocument> = index.writer(50_000_000)?;
+    if let QueryResults::Solutions(solutions) = oxigraph_store.query(index_init_sparql.as_str())? {
+        for solution in solutions.filter_map(|s| s.ok()) {
+            if let Some(iri_term) = solution.get("iri") {
+                if let NamedNode(iri) = iri_term {
+                    if let Some(text_term) = solution.get("text") {
+                        if let Literal(text_literal) = text_term {
+                            index_writer.add_document(doc!(
+                                iri_field => iri.to_string(),
+                                text_field => text_literal.value()
+                            ))?;
+                            // println!("IRI: {}, text: {}", iri.to_string(), text_literal.value());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("built Tantivy index");
 
     Ok(())
 }
