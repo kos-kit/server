@@ -130,16 +130,22 @@ CONSTRUCT WHERE {
     if oxigraph_store.is_empty()? {
         init_oxigraph_store(args.oxigraph_init_path, &oxigraph_store)?
     } else {
-        eprintln!("Oxigraph/Tantivy is not empty, skipping init")
+        eprintln!("Oxigraph store is not empty, skipping init")
     }
 
     let tantivy_index_reader = tantivy_index
         .reader_builder()
-        .reload_policy(ReloadPolicy::Manual)
+        .reload_policy(ReloadPolicy::OnCommitWithDelay)
         .try_into()?;
 
-    if tantivy_index_reader.searcher().num_docs() == 0 {
-        init_tantivy_index(&tantivy_index, index_init_sparql, &oxigraph_store)?
+    {
+        if tantivy_index_reader.searcher().num_docs() == 0 {
+            init_tantivy_index(&tantivy_index, index_init_sparql, &oxigraph_store)?;
+            // tantivy_index_reader.reload()?;
+            assert!(tantivy_index_reader.searcher().num_docs() == 0);
+        } else {
+            eprintln!("Tantivy index is not empty, skipping init")
+        }
     }
 
     let tantivy_query_parser =
@@ -151,8 +157,8 @@ CONSTRUCT WHERE {
                 index_result_sparql.clone(),
                 request,
                 oxigraph_store.clone(),
-                tantivy_index_reader.clone(),
-                tantivy_query_parser.clone(),
+                &tantivy_index_reader,
+                &tantivy_query_parser,
             )
             .unwrap_or_else(|(status, message)| error(status, message))
         }))
@@ -162,8 +168,8 @@ CONSTRUCT WHERE {
                 index_result_sparql.clone(),
                 request,
                 oxigraph_store.clone(),
-                tantivy_index_reader.clone(),
-                tantivy_query_parser.clone(),
+                &tantivy_index_reader,
+                &tantivy_query_parser,
             )
             .unwrap_or_else(|(status, message)| error(status, message))
         })
@@ -179,8 +185,8 @@ pub fn handle_request(
     index_result_sparql: String,
     request: &mut Request,
     oxigraph_store: Store,
-    tantivy_index_reader: IndexReader,
-    tantivy_query_parser: QueryParser,
+    tantivy_index_reader: &IndexReader,
+    tantivy_query_parser: &QueryParser,
 ) -> Result<Response, HttpError> {
     match request.url().path() {
         "/search" => search::handle_request(

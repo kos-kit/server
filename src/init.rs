@@ -164,7 +164,7 @@ pub fn init_tantivy_index(
     let iri_field = index.schema().get_field("iri")?;
     let text_field = index.schema().get_field("text")?;
 
-    let index_writer: IndexWriter<TantivyDocument> = index.writer(50_000_000)?;
+    let mut index_writer: IndexWriter<TantivyDocument> = index.writer(50_000_000)?;
     if let QueryResults::Solutions(solutions) = oxigraph_store.query(index_init_sparql.as_str())? {
         for solution in solutions.filter_map(|s| s.ok()) {
             if let Some(iri_term) = solution.get("iri") {
@@ -182,6 +182,7 @@ pub fn init_tantivy_index(
             }
         }
     }
+    index_writer.commit()?;
 
     eprintln!("built Tantivy index");
 

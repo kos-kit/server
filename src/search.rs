@@ -41,8 +41,8 @@ pub fn handle_request(
     index_result_sparql: String,
     oxigraph_store: Store,
     request: &mut Request,
-    tantivy_index_reader: IndexReader,
-    tantivy_query_parser: QueryParser,
+    tantivy_index_reader: &IndexReader,
+    tantivy_query_parser: &QueryParser,
 ) -> Result<Response, HttpError> {
     if request.method().as_ref() != "GET" {
         return Err((
@@ -59,6 +59,8 @@ pub fn handle_request(
         .map_err(|err| (Status::BAD_REQUEST, err.to_string()))?;
 
     let tantivy_index_searcher = tantivy_index_reader.searcher();
+    assert!(tantivy_index_searcher.num_docs() > 0);
+
     let top_docs = tantivy_index_searcher
         .search(
             &query,
