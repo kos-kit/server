@@ -202,7 +202,7 @@ fn evaluate_sparql_query(
     }
 }
 
-fn graph_content_negotiation(request: &Request) -> Result<GraphFormat, HttpError> {
+pub fn graph_content_negotiation(request: &Request) -> Result<GraphFormat, HttpError> {
     content_negotiation(
         request,
         &[
@@ -321,7 +321,7 @@ fn internal_server_error(message: impl fmt::Display) -> HttpError {
 }
 
 /// Hacky tool to allow implementing read on top of a write loop
-struct ReadForWrite<O, U: (Fn(O) -> io::Result<Option<O>>)> {
+pub struct ReadForWrite<O, U: (Fn(O) -> io::Result<Option<O>>)> {
     buffer: Rc<RefCell<Vec<u8>>>,
     position: usize,
     add_more_data: U,
@@ -329,7 +329,7 @@ struct ReadForWrite<O, U: (Fn(O) -> io::Result<Option<O>>)> {
 }
 
 impl<O: 'static, U: (Fn(O) -> io::Result<Option<O>>) + 'static> ReadForWrite<O, U> {
-    fn build_response(
+    pub fn build_response(
         initial_state_builder: impl FnOnce(ReadForWriteWriter) -> io::Result<O>,
         add_more_data: U,
         content_type: &'static str,
@@ -380,7 +380,7 @@ impl<O, U: (Fn(O) -> io::Result<Option<O>>)> Read for ReadForWrite<O, U> {
     }
 }
 
-struct ReadForWriteWriter {
+pub struct ReadForWriteWriter {
     buffer: Rc<RefCell<Vec<u8>>>,
 }
 

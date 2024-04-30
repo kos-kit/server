@@ -117,12 +117,16 @@ WHERE {
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 
-CONSTRUCT WHERE {
-    { ?iri rdfs:label ?text }
+CONSTRUCT {
+    ?iri rdfs:label ?rdfsLabel .
+    ?iri skos:prefLabel ?skosPrefLabel .
+    ?iri skos:altLabel ?skosAltLabel .
+} WHERE {
+    { ?iri rdfs:label ?rdfsLabel }
     UNION
-    { ?iri skos:prefLabel ?text }
+    { ?iri skos:prefLabel ?skosPrefLabel }
     UNION
-    { ?iri skos:altLabel ?text }
+    { ?iri skos:altLabel ?skosAltLabel }
 }",
             )
         };
