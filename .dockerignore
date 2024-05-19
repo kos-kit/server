@@ -1,6 +1,8 @@
 /Dockerfile
 /docker-compose.yml
 /.git/
+/.github/
+/.gitignore
 /LICENSE
 /target/
 /.vscode/
