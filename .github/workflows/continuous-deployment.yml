@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 env:
   DOCKER_IMAGE_NAME: ${{ github.repository }}
-  DOCEKR_REGISTRY: ghcr.io
+  DOCKER_REGISTRY: ghcr.io
 permissions:
   attestations: write
   contents: read
