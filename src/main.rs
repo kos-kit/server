@@ -66,6 +66,7 @@ pub fn main() -> anyhow::Result<()> {
 
     let oxigraph_store =
         if let Some(oxigraph_data_directory_path) = args.oxigraph_data_directory_path {
+            fs::create_dir_all(oxigraph_data_directory_path.clone())?;
             Store::open(oxigraph_data_directory_path)
         } else {
             Store::new()
@@ -80,6 +81,7 @@ pub fn main() -> anyhow::Result<()> {
 
     let tantivy_index =
         if let Some(index_data_directory_path) = args.tantivy_index_data_directory_path {
+            fs::create_dir_all(index_data_directory_path.clone())?;
             Index::open_or_create(
                 MmapDirectory::open(index_data_directory_path)?,
                 tantivy_index_schema,
