@@ -44,7 +44,7 @@ struct Args {
     #[arg(long)]
     oxigraph_data_directory_path: Option<PathBuf>,
 
-    /// Path to an RDF files or a directory of RDF files to load into Oxigraph
+    /// Path to an RDF file or a directory of RDF files to load into Oxigraph
     #[arg(long, required = true)]
     oxigraph_init_path: PathBuf,
 

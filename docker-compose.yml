@@ -2,5 +2,5 @@ services:
   server:
     build: .
     image: kos-kit/server
-    # volumes:
-    #   - ./data:/app/data:ro
+    volumes:
+      - /Users/minor/projects/kos-kit/hasset-explorer/data.rdf:/init
