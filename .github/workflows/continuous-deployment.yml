@@ -7,12 +7,13 @@ on:
 env:
   DOCKER_IMAGE_NAME: ${{ github.repository }}
   DOCKER_REGISTRY: ghcr.io
-permissions:
-  attestations: write
-  contents: read
-  pages: write
+# permissions:
+#   attestations: write
+#   contents: read
+#   pages: write
 jobs:
   build-and-push-docker-image:
+    permissions: write-all
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
