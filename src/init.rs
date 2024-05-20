@@ -71,9 +71,17 @@ fn format_from_path<T>(
 }
 
 pub fn init_oxigraph_store(init_path: PathBuf, store: &Store) -> anyhow::Result<()> {
-    let file_paths = if fs::metadata(init_path.clone())?.is_file() {
+    let init_path_fs_metadata = match fs::metadata(init_path.clone()) {
+        Ok(init_path_fs_metadata) => init_path_fs_metadata,
+        Err(_) => {
+            eprintln!("init path {} does not exist", init_path.display());
+            return Ok(());
+        }
+    };
+
+    let file_paths = if init_path_fs_metadata.is_file() {
         vec![init_path]
-    } else {
+    } else if init_path_fs_metadata.is_dir() {
         fs::read_dir(init_path)?
             .filter_map(|res| res.ok())
             .filter(|dir_entry| {
@@ -83,6 +91,10 @@ pub fn init_oxigraph_store(init_path: PathBuf, store: &Store) -> anyhow::Result<
             })
             .map(|dir_entry| dir_entry.path())
             .collect::<Vec<_>>()
+    } else {
+        return Err(anyhow::anyhow!(
+            "init path is neither a file nor a directory"
+        ));
     };
 
     eprintln!("bulk-loading Oxigraph");

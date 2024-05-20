@@ -92,7 +92,14 @@ pub fn main() -> anyhow::Result<()> {
 
     let index_init_sparql =
         if let Some(index_init_sparql_file_path) = args.index_init_sparql_file_path {
-            fs::read_to_string(index_init_sparql_file_path)?
+            match fs::read_to_string(index_init_sparql_file_path.clone()) {
+                Ok(s) => s,
+                Err(e) => panic!(
+                    "unable to read index init SPARQL file {}: {}",
+                    index_init_sparql_file_path.display(),
+                    e
+                ),
+            }
         } else {
             String::from(
                 "\
@@ -112,7 +119,14 @@ WHERE {
 
     let index_result_sparql =
         if let Some(index_result_sparql_file_path) = args.index_result_sparql_file_path {
-            fs::read_to_string(index_result_sparql_file_path)?
+            match fs::read_to_string(index_result_sparql_file_path.clone()) {
+                Ok(s) => s,
+                Err(e) => panic!(
+                    "unable to read index result SPARQL file {}: {}",
+                    index_result_sparql_file_path.display(),
+                    e
+                ),
+            }
         } else {
             String::from(
                 "\
