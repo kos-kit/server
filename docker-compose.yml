@@ -1,8 +1,7 @@
 services:
   server:
     build: .
-    environment:
-      OXIGRAPH_INIT_PATH: /data.nt
+    container_name: kos-kit-server
     image: kos-kit/server
     volumes:
-      - /Users/minor/projects/kos-kit/hasset-explorer/data.rdf:/data.nt
+      - ./docker/init:/init:ro
