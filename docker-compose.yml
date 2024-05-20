@@ -1,6 +1,8 @@
 services:
   server:
     build: .
+    environment:
+      OXIGRAPH_INIT_PATH: /data.nt
     image: kos-kit/server
     volumes:
-      - /Users/minor/projects/kos-kit/hasset-explorer/data.rdf:/init
+      - /Users/minor/projects/kos-kit/hasset-explorer/data.rdf:/data.nt
