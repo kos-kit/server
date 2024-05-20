@@ -3,5 +3,8 @@ services:
     build: .
     container_name: kos-kit-server
     image: kos-kit/server
+    init: true
+    ports:
+      - "127.0.0.1:8080:80"
     volumes:
       - ./docker/init:/init:ro
