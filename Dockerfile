@@ -21,9 +21,5 @@ RUN if [ "$BUILDARCH" != "$TARGETARCH" ] && [ "$TARGETARCH" = "arm64" ] ; \
 
 FROM --platform=$TARGETPLATFORM gcr.io/distroless/cc-debian11
 COPY --from=builder /server/target/release/kos-kit-server /usr/local/bin/kos-kit-server
-ENV BIND 0.0.0.0:80
-ENV OXIGRAPH_DATA_DIRECTORY_PATH /data/oxigraph
-ENV OXIGRAPH_INIT_PATH /init
-ENV TANTIVY_INDEX_DATA_DIRECTORY_PATH /data/tantivy
 ENTRYPOINT [ "/usr/local/bin/kos-kit-server" ]
-CMD [ "--bind", "${BIND}", "--oxigraph-data-directory-path", "${OXIGRAPH_DATA_DIRECTORY_PATH}", "--oxigraph-init-path", "${OXIGRAPH_INIT_PATH}", "--tantivy-index-data-directory-path", "${TANTIVY_INDEX_DATA_DIRECTORY_PATH}" ]
+CMD [ "--bind", "0.0.0.0:80", "--oxigraph-data-directory-path", "/data/oxigraph", "--oxigraph-init-path", "/init", "--tantivy-index-data-directory-path", "/data/tantivy" ]
