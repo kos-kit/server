@@ -111,8 +111,6 @@ WHERE {
     { ?iri rdfs:label ?text }
     UNION
     { ?iri skos:prefLabel ?text }
-    UNION
-    { ?iri skos:altLabel ?text }
 }",
             )
         };
@@ -130,19 +128,18 @@ WHERE {
         } else {
             String::from(
                 "\
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 
 CONSTRUCT {
+    ?iri rdf:type ?rdfType .
     ?iri rdfs:label ?rdfsLabel .
     ?iri skos:prefLabel ?skosPrefLabel .
-    ?iri skos:altLabel ?skosAltLabel .
 } WHERE {
-    { ?iri rdfs:label ?rdfsLabel }
+    { ?iri rdf:type ?rdfType . ?iri rdfs:label ?rdfsLabel . }
     UNION
-    { ?iri skos:prefLabel ?skosPrefLabel }
-    UNION
-    { ?iri skos:altLabel ?skosAltLabel }
+    { ?iri rdf:type ?rdfType . ?iri skos:prefLabel ?skosPrefLabel . }
 }",
             )
         };

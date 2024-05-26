@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use oxhttp::model::{HeaderName, Request, Response, Status};
+use oxhttp::model::{Request, Response, Status};
 use oxigraph::{
     io::GraphSerializer,
     model::{GraphNameRef, QuadRef},
