@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use oxhttp::model::{Request, Response, Status};
+use oxhttp::model::{HeaderName, Request, Response, Status};
 use oxigraph::{
     io::GraphSerializer,
     model::{GraphNameRef, QuadRef},
@@ -8,7 +8,10 @@ use oxigraph::{
     store::Store,
 };
 use tantivy::{
-    collector::TopDocs, query::QueryParser, schema::Value, IndexReader, TantivyDocument,
+    collector::{Count, TopDocs},
+    query::QueryParser,
+    schema::Value,
+    IndexReader, TantivyDocument,
 };
 use url::Url;
 
@@ -71,6 +74,25 @@ pub fn handle_request(
     }
 
     assert!(tantivy_index_searcher.num_docs() > 0);
+
+    let count = tantivy_index_searcher
+        .search(&query, &Count)
+        .map_err(|err| {
+            (
+                Status::INTERNAL_SERVER_ERROR,
+                format!(
+                    "error searching index:\nQuery: {}\nError: {}",
+                    parsed_url.query, err
+                ),
+            )
+        })?;
+
+    if parsed_url.limit == 0 {
+        return Ok(Response::builder(Status::NO_CONTENT)
+            .with_header("X-Total-Count", count.to_string())
+            .unwrap()
+            .build());
+    }
 
     let top_docs = tantivy_index_searcher
         .search(
@@ -184,7 +206,13 @@ pub fn handle_request(
                 })
             },
             format.media_type(),
-        );
+        )
+        .map(|mut response| {
+            response
+                .append_header("X-Total-Count", count.to_string())
+                .unwrap();
+            response
+        });
     } else {
         return Err((
             Status::INTERNAL_SERVER_ERROR,
