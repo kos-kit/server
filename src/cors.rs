@@ -13,7 +13,10 @@ pub fn middleware(
         HeaderName::from_str("Access-Control-Request-Headers").unwrap();
     let access_control_allow_headers =
         HeaderName::from_str("Access-Control-Allow-Headers").unwrap();
+    let access_control_expose_headers =
+        HeaderName::from_str("Access-Control-Expose-Headers").unwrap();
     let star = HeaderValue::from_str("*").unwrap();
+    let x_total_count = HeaderValue::from_str("X-Total-Count").unwrap();
     move |request| {
         if *request.method() == Method::OPTIONS {
             let mut response = Response::builder(Status::NO_CONTENT);
@@ -39,6 +42,9 @@ pub fn middleware(
                 response
                     .headers_mut()
                     .append(access_control_allow_origin.clone(), star.clone());
+                response
+                    .headers_mut()
+                    .append(access_control_expose_headers.clone(), x_total_count.clone());
             }
             response
         }
