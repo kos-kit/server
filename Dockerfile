@@ -23,4 +23,4 @@ FROM --platform=$TARGETPLATFORM gcr.io/distroless/cc-debian11
 COPY --from=builder /server/target/release/kos-kit-server /usr/local/bin/kos-kit-server
 ENTRYPOINT [ "/usr/local/bin/kos-kit-server" ]
 EXPOSE 80
-CMD [ "--bind", "0.0.0.0:80", "--oxigraph-data-directory-path", "/data/oxigraph", "--oxigraph-init-path", "/init", "--tantivy-index-data-directory-path", "/data/tantivy" ]
+CMD [ "--bind", "0.0.0.0:80", "--cors", "--oxigraph-data-directory-path", "/data/oxigraph", "--oxigraph-init-path", "/init", "--tantivy-index-data-directory-path", "/data/tantivy" ]
