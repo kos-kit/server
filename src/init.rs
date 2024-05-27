@@ -11,6 +11,7 @@ use std::cmp::max;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::thread::available_parallelism;
 use std::time::Instant;
@@ -85,6 +86,10 @@ pub fn init_oxigraph_store(init_path: PathBuf, store: &Store) -> anyhow::Result<
         fs::read_dir(init_path)?
             .filter_map(|res| res.ok())
             .filter(|dir_entry| {
+                if dir_entry.file_name().as_os_str().as_bytes()[0] == b'.' {
+                    return false;
+                }
+
                 dir_entry
                     .file_type()
                     .is_ok_and(|file_type| file_type.is_file())
