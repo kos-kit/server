@@ -1,0 +1,16 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+PREFIX skosxl: <http://www.w3.org/2008/05/skos-xl#>
+
+CONSTRUCT {
+    ?iri rdf:type ?rdfType .
+    ?iri rdfs:label ?rdfsLabel .
+    ?iri skos:prefLabel ?skosPrefLabel .
+} WHERE {
+    { ?iri rdf:type ?rdfType . ?iri rdfs:label ?rdfsLabel . }
+    UNION
+    { ?iri rdf:type ?rdfType . ?iri skos:prefLabel ?skosPrefLabel . }
+    UNION
+    { ?iri rdf:type ?rdfType . ?iri skosxl:prefLabel ?label . ?label skosxl:literalForm ?skosPrefLabel . }
+}

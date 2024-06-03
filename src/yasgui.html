@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Yasgui</title>
+    <link href="https://unpkg.com/@triply/yasgui/build/yasgui.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://unpkg.com/@triply/yasgui/build/yasgui.min.js"></script>
+</head>
+<body>
+    <div id="yasgui"></div>
+    <script>
+        const url = window.location.href.endsWith('/') ? window.location.href.slice(0, -1) : window.location.href;
+        new Yasgui(document.getElementById("yasgui"), {
+            requestConfig: { endpoint: url + "/query" },
+            endpointCatalogueOptions: {
+                getData: function () {
+                    return [
+                        { endpoint: url + "/query" },
+                        { endpoint: url + "/update" },
+                    ];
+                },
+                keys: [],
+            }
+        });
+    </script>
+</body>

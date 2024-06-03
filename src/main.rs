@@ -16,7 +16,10 @@ use tantivy::{Index, IndexReader, ReloadPolicy};
 
 type HttpError = (Status, String);
 
+const INDEX_INIT_SPARQL: &str = include_str!("./index_init.sparql");
+const INDEX_RESULT_SPARQL: &str = include_str!("./index_result.sparql");
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
+const YASGUI_HTML: &str = include_str!("./yasgui.html");
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -101,55 +104,22 @@ pub fn main() -> anyhow::Result<()> {
                 ),
             }
         } else {
-            String::from(
-                "\
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-PREFIX skosxl: <http://www.w3.org/2008/05/skos-xl#>
-
-SELECT DISTINCT ?iri ?text
-WHERE { 
-    { ?iri rdfs:label ?text }
-    UNION
-    { ?iri skos:prefLabel ?text }
-    UNION
-    { ?iri skosxl:prefLabel ?label . ?label skosxl:literalForm ?text . }
-}",
-            )
+            String::from(INDEX_INIT_SPARQL)
         };
 
-    let index_result_sparql = if let Some(index_result_sparql_file_path) =
-        args.index_result_sparql_file_path
-    {
-        match fs::read_to_string(index_result_sparql_file_path.clone()) {
-            Ok(s) => s,
-            Err(e) => panic!(
-                "unable to read index result SPARQL file {}: {}",
-                index_result_sparql_file_path.display(),
-                e
-            ),
-        }
-    } else {
-        String::from(
-                "\
-PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-PREFIX skosxl: <http://www.w3.org/2008/05/skos-xl#>
-
-CONSTRUCT {
-    ?iri rdf:type ?rdfType .
-    ?iri rdfs:label ?rdfsLabel .
-    ?iri skos:prefLabel ?skosPrefLabel .
-} WHERE {
-    { ?iri rdf:type ?rdfType . ?iri rdfs:label ?rdfsLabel . }
-    UNION
-    { ?iri rdf:type ?rdfType . ?iri skos:prefLabel ?skosPrefLabel . }
-    UNION
-    { ?iri rdf:type ?rdfType . ?iri skosxl:prefLabel ?label . ?label skosxl:literalForm ?skosPrefLabel . }
-}",
-            )
-    };
+    let index_result_sparql =
+        if let Some(index_result_sparql_file_path) = args.index_result_sparql_file_path {
+            match fs::read_to_string(index_result_sparql_file_path.clone()) {
+                Ok(s) => s,
+                Err(e) => panic!(
+                    "unable to read index result SPARQL file {}: {}",
+                    index_result_sparql_file_path.display(),
+                    e
+                ),
+            }
+        } else {
+            String::from(INDEX_RESULT_SPARQL)
+        };
 
     if oxigraph_store.is_empty()? {
         init_oxigraph_store(args.oxigraph_init_path, &oxigraph_store)?
@@ -213,6 +183,19 @@ pub fn handle_request(
     tantivy_query_parser: &QueryParser,
 ) -> Result<Response, HttpError> {
     match request.url().path() {
+        "/" => {
+            if request.method().as_ref() != "GET" {
+                return Err((
+                    Status::METHOD_NOT_ALLOWED,
+                    format!("{} is not supported by this server", request.method()),
+                ));
+            }
+
+            return Ok(Response::builder(Status::OK)
+                .with_header("Content-Type", String::from("text/html"))
+                .unwrap()
+                .with_body(YASGUI_HTML));
+        }
         "/search" => search::handle_request(
             index_result_sparql,
             oxigraph_store,
